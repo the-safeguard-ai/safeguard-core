@@ -1,0 +1,32 @@
+# Rust
+/target
+**/target
+Cargo.lock.bak
+
+# Node / Bun
+node_modules
+.bun
+dist
+.vite
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.local
+*.local
+
+# Build artifacts
+*.vsix
+extensions/browser/dist
+extensions/vscode/out
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea
+.vscode-test
+
+# Logs
+*.log
