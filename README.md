@@ -8,10 +8,10 @@ telemetry/discovery, teams, integrations), plus the shared Rust crates
 (`dlp`, `proto`, `embed`, `notify`).
 
 **License:** AGPL-3.0-only. (The TypeScript SDK & shared types are MIT — see
-[`safeguard-shared`](https://github.com/the-safeguard/safeguard-shared).)
+[`safeguard-shared`](https://github.com/the-safeguard-ai/safeguard-shared).)
 
 ## Self-host (no build required)
-Use **[safeguard-deploy](https://github.com/the-safeguard/safeguard-deploy)** —
+Use **[safeguard-deploy](https://github.com/the-safeguard-ai/safeguard-deploy)** —
 a single `docker compose up` that pulls pre-built images.
 
 ## Build from source
@@ -30,7 +30,7 @@ Requires Postgres (pgvector), Redis, and the Presidio sidecars — all wired in
 - `infra/migrations` — Postgres schema
 
 ## Container images
-`ghcr.io/the-safeguard/gateway` · `ghcr.io/the-safeguard/control-plane`
+`ghcr.io/the-safeguard-ai/gateway` · `ghcr.io/the-safeguard-ai/control-plane`
 (multi-arch, published on each `v*` tag).
 
-Part of the [SafeGuard AI](https://github.com/the-safeguard) suite.
+Part of the [SafeGuard AI](https://github.com/the-safeguard-ai) suite.
