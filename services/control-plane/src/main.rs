@@ -43,10 +43,36 @@ async fn main() -> anyhow::Result<()> {
     // compile time, so the infra/migrations/ dir must be present at build time
     // (the Dockerfile copies it in). Safe to run on every start — SQLx skips
     // already-applied migrations.
-    sqlx::migrate!("../../infra/migrations")
-        .run(&db)
-        .await
-        .expect("database migrations failed — check DATABASE_URL and that the postgres container is healthy");
+    //
+    // Retry loop handles transient DNS / network races — Postgres can pass its
+    // healthcheck before DNS is fully settled in the container.
+    let max_attempts = 10;
+    let mut migrations_ok = false;
+    for attempt in 1..=max_attempts {
+        match sqlx::migrate!("../../infra/migrations").run(&db).await {
+            Ok(()) => {
+                migrations_ok = true;
+                break;
+            }
+            Err(e) => {
+                if attempt < max_attempts {
+                    tracing::warn!(
+                        "migration attempt {}/{} failed: {e}; retrying in 2s…",
+                        attempt,
+                        max_attempts,
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                } else {
+                    panic!(
+                        "database migrations failed after {max_attempts} attempts: {e}"
+                    );
+                }
+            }
+        }
+    }
+    if migrations_ok {
+        tracing::info!("database migrations applied successfully");
+    }
 
     // Best-effort Redis connection for reading the shared daily-quota counter.
     // If it's down at startup we degrade gracefully (quota reports used = 0).
