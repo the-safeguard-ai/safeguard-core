@@ -2,7 +2,7 @@
 -- Contracts derived from Admin-dash/lib/mockData.ts
 
 -- ── Organizations ──────────────────────────────────────────────
-CREATE TABLE orgs (
+CREATE TABLE IF NOT EXISTS orgs (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name            TEXT NOT NULL,
     plan            TEXT NOT NULL DEFAULT 'free'
@@ -13,7 +13,7 @@ CREATE TABLE orgs (
 );
 
 -- ── Teams ──────────────────────────────────────────────────────
-CREATE TABLE teams (
+CREATE TABLE IF NOT EXISTS teams (
     id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id     UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     name       TEXT NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE teams (
 
 -- ── Users ──────────────────────────────────────────────────────
 -- role mirrors mockData.ts: Admin | Manager | User
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id        UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     team_id       UUID REFERENCES teams(id) ON DELETE SET NULL,
@@ -39,7 +39,7 @@ CREATE TABLE users (
 );
 
 -- ── API keys (gateway auth) ────────────────────────────────────
-CREATE TABLE api_keys (
+CREATE TABLE IF NOT EXISTS api_keys (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id      UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     user_id     UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -53,7 +53,7 @@ CREATE TABLE api_keys (
 
 -- ── Policies (DLP rules) ───────────────────────────────────────
 -- mirrors mockData.ts policyRules + routing/action extensions
-CREATE TABLE policies (
+CREATE TABLE IF NOT EXISTS policies (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id      UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     name        TEXT NOT NULL,
@@ -71,7 +71,7 @@ CREATE TABLE policies (
 );
 
 -- ── Usage / audit logs ─────────────────────────────────────────
-CREATE TABLE usage_logs (
+CREATE TABLE IF NOT EXISTS usage_logs (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id        UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -89,11 +89,11 @@ CREATE TABLE usage_logs (
     response_body TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_usage_logs_org_time ON usage_logs (org_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_logs_org_time ON usage_logs (org_id, created_at DESC);
 
 -- ── Risk alerts ────────────────────────────────────────────────
 -- mirrors mockData.ts riskAlerts
-CREATE TABLE risk_alerts (
+CREATE TABLE IF NOT EXISTS risk_alerts (
     id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id     UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     team_id    UUID REFERENCES teams(id) ON DELETE SET NULL,
@@ -104,11 +104,11 @@ CREATE TABLE risk_alerts (
                CHECK (status IN ('open','investigating','resolved')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_risk_alerts_org_time ON risk_alerts (org_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_risk_alerts_org_time ON risk_alerts (org_id, created_at DESC);
 
 -- ── Activity feed ──────────────────────────────────────────────
 -- mirrors mockData.ts recentActivity
-CREATE TABLE activity (
+CREATE TABLE IF NOT EXISTS activity (
     id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id     UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     actor      TEXT NOT NULL,         -- user name or 'System'
@@ -116,10 +116,10 @@ CREATE TABLE activity (
     target     TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_activity_org_time ON activity (org_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_org_time ON activity (org_id, created_at DESC);
 
 -- ── Conversations + messages (chat) ────────────────────────────
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
     id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id     UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -128,7 +128,7 @@ CREATE TABLE conversations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     role            TEXT NOT NULL CHECK (role IN ('user','assistant','system')),
@@ -136,11 +136,11 @@ CREATE TABLE messages (
     safe_mode       BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_messages_conversation ON messages (conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages (conversation_id, created_at);
 
 -- ── Integrations (Extensions page) ─────────────────────────────
 -- mirrors mockData.ts extensions
-CREATE TABLE integrations (
+CREATE TABLE IF NOT EXISTS integrations (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id      UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     slug        TEXT NOT NULL,         -- slack | google-sheets | teams | webhooks
@@ -151,7 +151,7 @@ CREATE TABLE integrations (
 );
 
 -- ── RAG: documents + chunks (pgvector) ─────────────────────────
-CREATE TABLE rag_documents (
+CREATE TABLE IF NOT EXISTS rag_documents (
     id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id     UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     title      TEXT NOT NULL,
@@ -160,7 +160,7 @@ CREATE TABLE rag_documents (
 );
 
 -- 1536 dims = text-embedding-3-small default; adjust per embedding model.
-CREATE TABLE rag_chunks (
+CREATE TABLE IF NOT EXISTS rag_chunks (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     document_id UUID NOT NULL REFERENCES rag_documents(id) ON DELETE CASCADE,
     org_id      UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
@@ -169,6 +169,6 @@ CREATE TABLE rag_chunks (
     chunk_index INTEGER NOT NULL DEFAULT 0,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_rag_chunks_embedding ON rag_chunks
+CREATE INDEX IF NOT EXISTS idx_rag_chunks_embedding ON rag_chunks
     USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX idx_rag_chunks_org ON rag_chunks (org_id);
+CREATE INDEX IF NOT EXISTS idx_rag_chunks_org ON rag_chunks (org_id);

@@ -39,6 +39,15 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(10)
         .connect_lazy(&database_url)?;
 
+    // Run SQLx migrations automatically on startup. Migrations are embedded at
+    // compile time, so the infra/migrations/ dir must be present at build time
+    // (the Dockerfile copies it in). Safe to run on every start — SQLx skips
+    // already-applied migrations.
+    sqlx::migrate!("../../infra/migrations")
+        .run(&db)
+        .await
+        .expect("database migrations failed — check DATABASE_URL and that the postgres container is healthy");
+
     // Best-effort Redis connection for reading the shared daily-quota counter.
     // If it's down at startup we degrade gracefully (quota reports used = 0).
     let redis_url = env("REDIS_URL", "redis://localhost:6379");

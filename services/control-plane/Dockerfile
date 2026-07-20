@@ -12,6 +12,7 @@ RUN apt-get update \
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 COPY services ./services
+COPY infra ./infra
 
 RUN cargo build --release -p control-plane
 
