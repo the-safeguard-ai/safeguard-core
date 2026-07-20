@@ -10,18 +10,27 @@ telemetry/discovery, teams, integrations), plus the shared Rust crates
 **License:** AGPL-3.0-only. (The TypeScript SDK & shared types are MIT — see
 [`safeguard-shared`](https://github.com/the-safeguard-ai/safeguard-shared).)
 
-## Self-host (no build required)
-Use **[safeguard-deploy](https://github.com/the-safeguard-ai/safeguard-deploy)** —
-a single `docker compose up` that pulls pre-built images.
+## Quick start (pre-built images, no build required)
+
+```bash
+cp .env.example .env                 # edit JWT_SECRET + your AI provider key
+docker compose up -d                 # pulls pre-built images — nothing builds locally
+```
+
+Opens at **http://localhost:5174** (chat) and **http://localhost:5173** (admin dashboard).
 
 ## Build from source
+
 ```bash
 cp .env.example .env        # set JWT_SECRET + a provider key
 cargo run -p control-plane  # :8081
 cargo run -p gateway        # :8080
 ```
-Requires Postgres (pgvector), Redis, and the Presidio sidecars — all wired in
-`safeguard-deploy`.
+Requires Postgres (pgvector) and Redis — start them with `docker compose up -d postgres redis`.
+
+## Standalone deploy repo
+
+For production or cloud VMs, use **[safeguard-deploy](https://github.com/the-safeguard-ai/safeguard-deploy)** — same stack, pinned images, `.env.example` tailored for self-host.
 
 ## Layout
 - `crates/dlp` — DLP engine (detectors, regional packs, Presidio NER)

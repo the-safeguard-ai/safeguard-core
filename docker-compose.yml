@@ -1,0 +1,102 @@
+# SafeGuard AI — one-command self-host.
+#
+#   cp .env.example .env   # set JWT_SECRET + your AI provider key
+#   docker compose up -d   # pulls pre-built images — nothing is built locally
+#
+# Images are published by the release workflow to ghcr.io/the-safeguard-ai/*.
+# Pin a version with SAFEGUARD_VERSION in .env.
+name: safeguard-ai
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: safeguard-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-safeguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-safeguard}
+      POSTGRES_DB: ${POSTGRES_DB:-safeguard}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # pgvector + uuid-ossp extensions on first DB init
+      - ./infra/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-safeguard} -d ${POSTGRES_DB:-safeguard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: safeguard-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Microsoft Presidio — deep PII NER for the DLP deep-scan path. OPTIONAL and
+  # memory-heavy (~2-3 GB): only starts with `--profile full`. Without it the
+  # gateway still runs the full regex/rule-pack DLP engine (deep NER is just off).
+  # Note: these images are amd64-only — on ARM (e.g. Oracle Ampere) use the slim
+  # profile, or run them under emulation.
+  presidio-analyzer:
+    image: mcr.microsoft.com/presidio-analyzer:latest
+    container_name: safeguard-presidio-analyzer
+    profiles: ["full"]
+    restart: unless-stopped
+
+  presidio-anonymizer:
+    image: mcr.microsoft.com/presidio-anonymizer:latest
+    container_name: safeguard-presidio-anonymizer
+    profiles: ["full"]
+    restart: unless-stopped
+
+  gateway:
+    image: ghcr.io/the-safeguard-ai/gateway:${SAFEGUARD_VERSION:-latest}
+    container_name: safeguard-gateway
+    env_file: .env
+    environment:
+      GATEWAY_BIND: 0.0.0.0:8080
+      DATABASE_URL: postgres://${POSTGRES_USER:-safeguard}:${POSTGRES_PASSWORD:-safeguard}@postgres:5432/${POSTGRES_DB:-safeguard}
+      REDIS_URL: redis://redis:6379
+      PRESIDIO_URL: ${PRESIDIO_URL:-}
+    ports: ["8080:8080"]
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  control-plane:
+    image: ghcr.io/the-safeguard-ai/control-plane:${SAFEGUARD_VERSION:-latest}
+    container_name: safeguard-control-plane
+    env_file: .env
+    environment:
+      CONTROL_PLANE_BIND: 0.0.0.0:8081
+      DATABASE_URL: postgres://${POSTGRES_USER:-safeguard}:${POSTGRES_PASSWORD:-safeguard}@postgres:5432/${POSTGRES_DB:-safeguard}
+      REDIS_URL: redis://redis:6379
+    ports: ["8081:8081"]
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  admin:
+    image: ghcr.io/the-safeguard-ai/admin:${SAFEGUARD_VERSION:-latest}
+    container_name: safeguard-admin
+    ports: ["5173:80"]
+    restart: unless-stopped
+    depends_on: [control-plane, gateway]
+
+  chat:
+    image: ghcr.io/the-safeguard-ai/chat:${SAFEGUARD_VERSION:-latest}
+    container_name: safeguard-chat
+    ports: ["5174:80"]
+    restart: unless-stopped
+    depends_on: [gateway]
+
+volumes:
+  pgdata:
+  redisdata:
