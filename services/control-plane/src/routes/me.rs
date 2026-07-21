@@ -54,14 +54,16 @@ pub async fn list_keys(
 
     Ok(Json(
         rows.into_iter()
-            .map(|(id, name, prefix, created_at, last_used, revoked)| PersonalKeyInfo {
-                id,
-                name,
-                prefix,
-                created_at,
-                last_used,
-                revoked,
-            })
+            .map(
+                |(id, name, prefix, created_at, last_used, revoked)| PersonalKeyInfo {
+                    id,
+                    name,
+                    prefix,
+                    created_at,
+                    last_used,
+                    revoked,
+                },
+            )
             .collect(),
     ))
 }
@@ -146,10 +148,7 @@ pub struct PersonalStats {
 }
 
 /// Personal usage stats for the current user.
-pub async fn stats(
-    State(s): State<AppState>,
-    claims: Claims,
-) -> AppResult<Json<PersonalStats>> {
+pub async fn stats(State(s): State<AppState>, claims: Claims) -> AppResult<Json<PersonalStats>> {
     let (total_prompts, total_redactions): (i64, i64) = sqlx::query_as(
         r#"SELECT COUNT(*)::bigint, COALESCE(SUM(redactions), 0)::bigint
            FROM usage_logs WHERE org_id = $1 AND user_id = $2"#,
@@ -216,13 +215,11 @@ pub async fn activity(
     State(s): State<AppState>,
     claims: Claims,
 ) -> AppResult<Json<Vec<ActivityEntry>>> {
-    let actor = sqlx::query_scalar::<_, String>(
-        "SELECT name FROM users WHERE id = $1",
-    )
-    .bind(claims.sub)
-    .fetch_optional(&s.db)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    let actor = sqlx::query_scalar::<_, String>("SELECT name FROM users WHERE id = $1")
+        .bind(claims.sub)
+        .fetch_optional(&s.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
 
     let rows = sqlx::query_as::<_, (String, String, String)>(
         r#"SELECT action, target,

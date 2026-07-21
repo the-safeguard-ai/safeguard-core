@@ -258,26 +258,28 @@ pub async fn register(
 
         // ── Self-hosted: registration is disabled; admin must invite members. ─
         ControlPlaneMode::SelfHosted => {
-            tracing::warn!("registration blocked — self-hosted mode (admin: {})",
-                state.admin_email.as_deref().unwrap_or("unknown"));
+            tracing::warn!(
+                "registration blocked — self-hosted mode (admin: {})",
+                state.admin_email.as_deref().unwrap_or("unknown")
+            );
             Err(AppError::Forbidden)
         }
 
         // ── Cloud: join the shared bootstrap org as a User. ───────────────────
         ControlPlaneMode::Cloud => {
-            let admin_email = state.admin_email.as_deref().ok_or_else(|| {
-                AppError::Internal("cloud mode requires admin_email".into())
-            })?;
+            let admin_email = state
+                .admin_email
+                .as_deref()
+                .ok_or_else(|| AppError::Internal("cloud mode requires admin_email".into()))?;
 
-            let org_id: Uuid = sqlx::query_scalar(
-                "SELECT org_id FROM users WHERE email = $1 AND role = 'Admin'",
-            )
-            .bind(admin_email)
-            .fetch_optional(&state.db)
-            .await?
-            .ok_or(AppError::Internal(
-                "bootstrap admin not found — run with ADMIN_EMAIL set first".into(),
-            ))?;
+            let org_id: Uuid =
+                sqlx::query_scalar("SELECT org_id FROM users WHERE email = $1 AND role = 'Admin'")
+                    .bind(admin_email)
+                    .fetch_optional(&state.db)
+                    .await?
+                    .ok_or(AppError::Internal(
+                        "bootstrap admin not found — run with ADMIN_EMAIL set first".into(),
+                    ))?;
 
             let user_id: Uuid = sqlx::query_scalar(
                 r#"INSERT INTO users (org_id, name, email, role, status, password_hash)
@@ -513,11 +515,7 @@ pub async fn accept_invite(
 /// In both SelfHosted and Cloud modes this creates the shared org and the first
 /// admin user. The generated (or configured) initial password is logged — the
 /// admin **must** change it after first login.
-pub async fn bootstrap_admin(
-    db: &sqlx::PgPool,
-    admin_email: &str,
-    admin_password: Option<&str>,
-) {
+pub async fn bootstrap_admin(db: &sqlx::PgPool, admin_email: &str, admin_password: Option<&str>) {
     // Idempotency check — already bootstrapped?
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND role = 'Admin')",
@@ -532,11 +530,7 @@ pub async fn bootstrap_admin(
         return;
     }
 
-    let org_name = admin_email
-        .split('@')
-        .next()
-        .unwrap_or("admin")
-        .to_string();
+    let org_name = admin_email.split('@').next().unwrap_or("admin").to_string();
 
     // Create the shared org.
     let org_id: Uuid = sqlx::query_scalar("INSERT INTO orgs (name) VALUES ($1) RETURNING id")

@@ -37,8 +37,9 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Deployment mode / admin bootstrap ──────────────────────────────────
     let admin_email: Option<String> = std::env::var("ADMIN_EMAIL").ok().filter(|s| !s.is_empty());
-    let admin_password: Option<String> =
-        std::env::var("ADMIN_PASSWORD").ok().filter(|s| !s.is_empty());
+    let admin_password: Option<String> = std::env::var("ADMIN_PASSWORD")
+        .ok()
+        .filter(|s| !s.is_empty());
     let is_cloud = env("CONTROL_PLANE_MODE", "") == "cloud";
     let mode = match (&admin_email, is_cloud) {
         (None, _) => ControlPlaneMode::Dev,
@@ -74,9 +75,7 @@ async fn main() -> anyhow::Result<()> {
                     );
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 } else {
-                    panic!(
-                        "database migrations failed after {max_attempts} attempts: {e}"
-                    );
+                    panic!("database migrations failed after {max_attempts} attempts: {e}");
                 }
             }
         }
@@ -238,7 +237,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/discovery/labels", get(routes::telemetry::labels))
         .route("/discovery/events", get(routes::telemetry::events))
         // personal endpoints (own data, no manage rights needed)
-        .route("/me/keys", get(routes::me::list_keys).post(routes::me::create_key))
+        .route(
+            "/me/keys",
+            get(routes::me::list_keys).post(routes::me::create_key),
+        )
         .route("/me/keys/:id", delete(routes::me::revoke_key))
         .route("/me/stats", get(routes::me::stats))
         .route("/me/activity", get(routes::me::activity));

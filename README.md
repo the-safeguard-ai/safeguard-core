@@ -17,7 +17,28 @@ cp .env.example .env                 # edit JWT_SECRET + your AI provider key
 docker compose up -d                 # pulls pre-built images — nothing builds locally
 ```
 
-Opens at **http://localhost:5174** (chat) and **http://localhost:5173** (admin dashboard).
+Then open **http://localhost:5174** (chat) and **http://localhost:5173** (admin dashboard).
+
+> **Admin bootstrap:** Set `ADMIN_EMAIL` in `.env` to auto-create the initial admin
+> on first start. The generated password is logged to stdout. Set
+> `CONTROL_PLANE_MODE=cloud` for open sign-up as normal users in a shared org.
+> See `.env.example` for details.
+
+## Deployment modes
+
+| Mode | `ADMIN_EMAIL` | `CONTROL_PLANE_MODE` | Registration |
+|------|--------------|---------------------|--------------|
+| **Dev** | unset | — | Creates a new org + Admin |
+| **Self-hosted** | set | unset | Disabled — admin invites members |
+| **Cloud** | set | `cloud` | Open sign-up → User role in shared org |
+
+## Role-based access
+
+| Role | Access |
+|------|--------|
+| **Admin** | Full admin dashboard (all pages, full CRUD) |
+| **Manager** | Admin dashboard (no policy/integration/RAG write, no Extensions) |
+| **User** | Chat app + Account page (profile, usage stats, API keys, activity) |
 
 ## Build from source
 

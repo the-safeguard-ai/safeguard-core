@@ -1,9 +1,9 @@
 pub mod conversations;
 pub mod extension;
-pub mod me;
 pub mod integrations;
 pub mod keys;
 pub mod logs;
+pub mod me;
 pub mod metrics;
 pub mod policies;
 pub mod rag;
