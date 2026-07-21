@@ -52,7 +52,7 @@ pub async fn ingest(
     claims: Claims,
     Json(req): Json<IngestReq>,
 ) -> AppResult<Json<IngestResp>> {
-    claims.require_manage()?;
+    claims.require_admin()?;
     if req.title.trim().is_empty() || req.content.trim().is_empty() {
         return Err(AppError::BadRequest(
             "title and content are required".into(),
@@ -156,7 +156,7 @@ pub async fn delete(
     claims: Claims,
     Path(id): Path<Uuid>,
 ) -> AppResult<axum::http::StatusCode> {
-    claims.require_manage()?;
+    claims.require_admin()?;
     // Chunks cascade via the FK.
     let title: Option<String> = sqlx::query_scalar(
         "DELETE FROM rag_documents WHERE id = $1 AND org_id = $2 RETURNING title",

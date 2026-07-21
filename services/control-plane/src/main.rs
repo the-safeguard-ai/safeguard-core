@@ -16,7 +16,7 @@ use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
-use state::AppState;
+use state::{AppState, ControlPlaneMode};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -34,6 +34,17 @@ async fn main() -> anyhow::Result<()> {
         "postgres://safeguard:safeguard@localhost:5432/safeguard",
     );
     let bind = env("CONTROL_PLANE_BIND", "0.0.0.0:8081");
+
+    // ── Deployment mode / admin bootstrap ──────────────────────────────────
+    let admin_email: Option<String> = std::env::var("ADMIN_EMAIL").ok().filter(|s| !s.is_empty());
+    let admin_password: Option<String> =
+        std::env::var("ADMIN_PASSWORD").ok().filter(|s| !s.is_empty());
+    let is_cloud = env("CONTROL_PLANE_MODE", "") == "cloud";
+    let mode = match (&admin_email, is_cloud) {
+        (None, _) => ControlPlaneMode::Dev,
+        (Some(_), true) => ControlPlaneMode::Cloud,
+        (Some(_), false) => ControlPlaneMode::SelfHosted,
+    };
 
     let db = PgPoolOptions::new()
         .max_connections(10)
@@ -72,6 +83,11 @@ async fn main() -> anyhow::Result<()> {
     }
     if migrations_ok {
         tracing::info!("database migrations applied successfully");
+    }
+
+    // Bootstrap admin account if ADMIN_EMAIL is configured.
+    if let Some(ref email) = admin_email {
+        auth::bootstrap_admin(&db, email, admin_password.as_deref()).await;
     }
 
     // Best-effort Redis connection for reading the shared daily-quota counter.
@@ -122,6 +138,8 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or(2_592_000),
         redis,
         embed,
+        mode,
+        admin_email,
     };
 
     let cors = CorsLayer::new()
@@ -137,6 +155,7 @@ async fn main() -> anyhow::Result<()> {
         // invite acceptance (public — invitee has no session yet)
         .route("/auth/invite", get(auth::invite_preview))
         .route("/auth/accept-invite", post(auth::accept_invite))
+        .route("/auth/change-password", post(auth::change_password))
         // metrics
         .route("/metrics/kpis", get(routes::metrics::kpis))
         .route("/metrics/usage", get(routes::metrics::usage))
@@ -217,7 +236,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/telemetry/events", post(routes::telemetry::ingest))
         .route("/discovery", get(routes::telemetry::discovery))
         .route("/discovery/labels", get(routes::telemetry::labels))
-        .route("/discovery/events", get(routes::telemetry::events));
+        .route("/discovery/events", get(routes::telemetry::events))
+        // personal endpoints (own data, no manage rights needed)
+        .route("/me/keys", get(routes::me::list_keys).post(routes::me::create_key))
+        .route("/me/keys/:id", delete(routes::me::revoke_key))
+        .route("/me/stats", get(routes::me::stats))
+        .route("/me/activity", get(routes::me::activity));
 
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))

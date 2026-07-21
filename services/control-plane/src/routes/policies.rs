@@ -72,7 +72,7 @@ pub async fn create(
     claims: Claims,
     Json(p): Json<CreatePolicy>,
 ) -> AppResult<Json<Policy>> {
-    claims.require_manage()?;
+    claims.require_admin()?;
     let row = sqlx::query_as::<_, Policy>(&format!(
         r#"INSERT INTO policies
             (org_id, name, description, enabled, patterns, action, deep_scan, route, rag_enabled)
@@ -120,7 +120,7 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(p): Json<UpdatePolicy>,
 ) -> AppResult<Json<Policy>> {
-    claims.require_manage()?;
+    claims.require_admin()?;
     // COALESCE keeps existing values for fields not supplied.
     let row = sqlx::query_as::<_, Policy>(&format!(
         r#"UPDATE policies SET
@@ -165,7 +165,7 @@ pub async fn delete(
     claims: Claims,
     Path(id): Path<Uuid>,
 ) -> AppResult<axum::http::StatusCode> {
-    claims.require_manage()?;
+    claims.require_admin()?;
     let name: Option<String> =
         sqlx::query_scalar("DELETE FROM policies WHERE id=$1 AND org_id=$2 RETURNING name")
             .bind(id)

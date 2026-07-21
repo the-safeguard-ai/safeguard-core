@@ -108,7 +108,7 @@ pub async fn install(
     claims: Claims,
     Path(slug): Path<String>,
 ) -> AppResult<axum::http::StatusCode> {
-    claims.require_manage()?;
+    claims.require_admin()?;
     ensure_in_catalog(&slug)?;
     sqlx::query(
         r#"INSERT INTO integrations (org_id, slug, installed) VALUES ($1,$2,TRUE)
@@ -126,7 +126,7 @@ pub async fn uninstall(
     claims: Claims,
     Path(slug): Path<String>,
 ) -> AppResult<axum::http::StatusCode> {
-    claims.require_manage()?;
+    claims.require_admin()?;
     sqlx::query("UPDATE integrations SET installed=FALSE WHERE org_id=$1 AND slug=$2")
         .bind(claims.org)
         .bind(&slug)
@@ -148,7 +148,7 @@ pub async fn configure(
     Path(slug): Path<String>,
     Json(body): Json<ConfigBody>,
 ) -> AppResult<axum::http::StatusCode> {
-    claims.require_manage()?;
+    claims.require_admin()?;
     ensure_in_catalog(&slug)?;
     if !is_configurable(&slug) {
         return Err(AppError::BadRequest(
@@ -181,7 +181,7 @@ pub async fn test(
     claims: Claims,
     Path(slug): Path<String>,
 ) -> AppResult<axum::http::StatusCode> {
-    claims.require_manage()?;
+    claims.require_admin()?;
     ensure_in_catalog(&slug)?;
     let url: Option<String> =
         sqlx::query_scalar("SELECT config->>'url' FROM integrations WHERE org_id=$1 AND slug=$2")

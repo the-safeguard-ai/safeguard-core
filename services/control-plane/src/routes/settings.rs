@@ -49,7 +49,7 @@ pub async fn update(
     claims: Claims,
     Json(u): Json<UpdateSettings>,
 ) -> AppResult<Json<OrgSettings>> {
-    claims.require_manage()?;
+    claims.require_admin()?;
     sqlx::query(
         r#"UPDATE orgs SET
               name = COALESCE($2, name),

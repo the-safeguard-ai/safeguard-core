@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
-use crate::state::AppState;
+use crate::state::{AppState, ControlPlaneMode};
 
 /// JWT claims. `sub` = user id, `org` = org id, `role` = RBAC role.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,7 +28,6 @@ pub struct Claims {
 }
 
 impl Claims {
-    #[allow(dead_code)]
     pub fn is_admin(&self) -> bool {
         self.role == "Admin"
     }
@@ -38,6 +37,14 @@ impl Claims {
     }
     pub fn require_manage(&self) -> AppResult<()> {
         if self.can_manage() {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden)
+        }
+    }
+    /// Only Admin may mutate sensitive org resources.
+    pub fn require_admin(&self) -> AppResult<()> {
+        if self.is_admin() {
             Ok(())
         } else {
             Err(AppError::Forbidden)
@@ -193,59 +200,114 @@ pub async fn register(
     }
     let pw_hash = hash_password(&req.password)?;
 
-    let mut tx = state.db.begin().await?;
-    let org_id: Uuid = sqlx::query_scalar("INSERT INTO orgs (name) VALUES ($1) RETURNING id")
-        .bind(&req.org_name)
-        .fetch_one(&mut *tx)
-        .await?;
+    // ── Mode dispatch ─────────────────────────────────────────────────────────
+    match state.mode {
+        // ── Dev mode: create a new org + Admin user (current behaviour). ──────
+        ControlPlaneMode::Dev => {
+            let mut tx = state.db.begin().await?;
+            let org_id: Uuid =
+                sqlx::query_scalar("INSERT INTO orgs (name) VALUES ($1) RETURNING id")
+                    .bind(&req.org_name)
+                    .fetch_one(&mut *tx)
+                    .await?;
 
-    let user_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO users (org_id, name, email, role, status, password_hash)
-           VALUES ($1, $2, $3, 'Admin', 'active', $4) RETURNING id"#,
-    )
-    .bind(org_id)
-    .bind(&req.name)
-    .bind(&req.email)
-    .bind(&pw_hash)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| match e {
-        sqlx::Error::Database(db) if db.is_unique_violation() => {
-            AppError::Conflict("email already registered".into())
+            let user_id: Uuid = sqlx::query_scalar(
+                r#"INSERT INTO users (org_id, name, email, role, status, password_hash)
+                   VALUES ($1, $2, $3, 'Admin', 'active', $4) RETURNING id"#,
+            )
+            .bind(org_id)
+            .bind(&req.name)
+            .bind(&req.email)
+            .bind(&pw_hash)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::Database(db) if db.is_unique_violation() => {
+                    AppError::Conflict("email already registered".into())
+                }
+                other => AppError::Db(other),
+            })?;
+
+            // Seed default DLP policies so the org is protected from day one.
+            for (name, description, patterns) in DEFAULT_POLICIES {
+                let pats: Vec<String> = patterns.iter().map(|s| s.to_string()).collect();
+                sqlx::query(
+                    r#"INSERT INTO policies (org_id, name, description, enabled, patterns, action, route)
+                       VALUES ($1, $2, $3, TRUE, $4, 'redact', 'cloud')"#,
+                )
+                .bind(org_id)
+                .bind(name)
+                .bind(description)
+                .bind(&pats)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+
+            crate::routes::metrics::record_activity(
+                &state.db,
+                org_id,
+                user_id,
+                "created organization",
+                &req.org_name,
+            )
+            .await;
+
+            issue_auth(&state, user_id, org_id, "Admin", &req.name, &req.email)
         }
-        other => AppError::Db(other),
-    })?;
 
-    // Seed default DLP policies so the org is protected from day one. These cover
-    // the international/built-in detectors only — country-specific identifiers stay
-    // opt-in via regional rule packs. Admins layer industry-specific policies
-    // (health records, extra card schemes, regional packs) on top.
-    for (name, description, patterns) in DEFAULT_POLICIES {
-        let pats: Vec<String> = patterns.iter().map(|s| s.to_string()).collect();
-        sqlx::query(
-            r#"INSERT INTO policies (org_id, name, description, enabled, patterns, action, route)
-               VALUES ($1, $2, $3, TRUE, $4, 'redact', 'cloud')"#,
-        )
-        .bind(org_id)
-        .bind(name)
-        .bind(description)
-        .bind(&pats)
-        .execute(&mut *tx)
-        .await?;
+        // ── Self-hosted: registration is disabled; admin must invite members. ─
+        ControlPlaneMode::SelfHosted => {
+            tracing::warn!("registration blocked — self-hosted mode (admin: {})",
+                state.admin_email.as_deref().unwrap_or("unknown"));
+            Err(AppError::Forbidden)
+        }
+
+        // ── Cloud: join the shared bootstrap org as a User. ───────────────────
+        ControlPlaneMode::Cloud => {
+            let admin_email = state.admin_email.as_deref().ok_or_else(|| {
+                AppError::Internal("cloud mode requires admin_email".into())
+            })?;
+
+            let org_id: Uuid = sqlx::query_scalar(
+                "SELECT org_id FROM users WHERE email = $1 AND role = 'Admin'",
+            )
+            .bind(admin_email)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::Internal(
+                "bootstrap admin not found — run with ADMIN_EMAIL set first".into(),
+            ))?;
+
+            let user_id: Uuid = sqlx::query_scalar(
+                r#"INSERT INTO users (org_id, name, email, role, status, password_hash)
+                   VALUES ($1, $2, $3, 'User', 'active', $4) RETURNING id"#,
+            )
+            .bind(org_id)
+            .bind(&req.name)
+            .bind(&req.email)
+            .bind(&pw_hash)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::Database(db) if db.is_unique_violation() => {
+                    AppError::Conflict("email already registered".into())
+                }
+                other => AppError::Db(other),
+            })?;
+
+            crate::routes::metrics::record_activity(
+                &state.db,
+                org_id,
+                user_id,
+                "joined organization",
+                &req.email,
+            )
+            .await;
+
+            issue_auth(&state, user_id, org_id, "User", &req.name, &req.email)
+        }
     }
-
-    tx.commit().await?;
-
-    crate::routes::metrics::record_activity(
-        &state.db,
-        org_id,
-        user_id,
-        "created organization",
-        &req.org_name,
-    )
-    .await;
-
-    issue_auth(&state, user_id, org_id, "Admin", &req.name, &req.email)
 }
 
 pub async fn login(
@@ -296,6 +358,50 @@ pub async fn refresh(
         state.access_ttl_secs,
     )?;
     Ok(Json(RefreshResp { access_token }))
+}
+
+// ── Change password (authenticated) ──────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ChangePasswordReq {
+    pub old_password: String,
+    pub new_password: String,
+}
+
+/// Change the current user's password. Requires the old password for verification.
+pub async fn change_password(
+    State(state): State<AppState>,
+    claims: Claims,
+    Json(req): Json<ChangePasswordReq>,
+) -> AppResult<axum::http::StatusCode> {
+    if req.new_password.len() < 8 {
+        return Err(AppError::BadRequest(
+            "new password must be at least 8 chars".into(),
+        ));
+    }
+
+    let row = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT password_hash FROM users WHERE id = $1 AND org_id = $2",
+    )
+    .bind(claims.sub)
+    .bind(claims.org)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let pw_hash = row.flatten().ok_or(AppError::Unauthorized)?;
+
+    if !verify_password(&req.old_password, &pw_hash) {
+        return Err(AppError::Unauthorized);
+    }
+
+    let new_hash = hash_password(&req.new_password)?;
+    sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+        .bind(&new_hash)
+        .bind(claims.sub)
+        .execute(&state.db)
+        .await?;
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 // ── Invite acceptance (public) ───────────────────────────────────────────────
@@ -397,6 +503,90 @@ pub async fn accept_invite(
     .await;
 
     issue_auth(&state, user_id, org_id, &role, &name, &email)
+}
+
+/// Bootstrap the first admin account from environment variables.
+///
+/// Called once at startup when `ADMIN_EMAIL` is set. Idempotent: if the admin
+/// user already exists (detected by email + `Admin` role) it's a no-op.
+///
+/// In both SelfHosted and Cloud modes this creates the shared org and the first
+/// admin user. The generated (or configured) initial password is logged — the
+/// admin **must** change it after first login.
+pub async fn bootstrap_admin(
+    db: &sqlx::PgPool,
+    admin_email: &str,
+    admin_password: Option<&str>,
+) {
+    // Idempotency check — already bootstrapped?
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 AND role = 'Admin')",
+    )
+    .bind(admin_email)
+    .fetch_one(db)
+    .await
+    .unwrap_or(false);
+
+    if exists {
+        tracing::info!("admin account already exists for {admin_email}");
+        return;
+    }
+
+    let org_name = admin_email
+        .split('@')
+        .next()
+        .unwrap_or("admin")
+        .to_string();
+
+    // Create the shared org.
+    let org_id: Uuid = sqlx::query_scalar("INSERT INTO orgs (name) VALUES ($1) RETURNING id")
+        .bind(&org_name)
+        .fetch_one(db)
+        .await
+        .expect("failed to create bootstrap org");
+
+    // Create the admin user with a password.
+    let password = match admin_password {
+        Some(p) if !p.is_empty() => p.to_string(),
+        _ => {
+            // Generate a random password (UUID string — unique, no special deps).
+            Uuid::new_v4().to_string()
+        }
+    };
+
+    let pw_hash = hash_password(&password).expect("failed to hash admin password");
+
+    sqlx::query(
+        r#"INSERT INTO users (org_id, name, email, role, status, password_hash)
+           VALUES ($1, $2, $3, 'Admin', 'active', $4)"#,
+    )
+    .bind(org_id)
+    .bind(&org_name)
+    .bind(admin_email)
+    .bind(&pw_hash)
+    .execute(db)
+    .await
+    .expect("failed to create admin user");
+
+    // Seed the same default DLP policies as the register handler.
+    for (name, description, patterns) in DEFAULT_POLICIES {
+        let pats: Vec<String> = patterns.iter().map(|s| s.to_string()).collect();
+        sqlx::query(
+            r#"INSERT INTO policies (org_id, name, description, enabled, patterns, action, route)
+               VALUES ($1, $2, $3, TRUE, $4, 'redact', 'cloud')"#,
+        )
+        .bind(org_id)
+        .bind(name)
+        .bind(description)
+        .bind(&pats)
+        .execute(db)
+        .await
+        .expect("failed to seed default policies for bootstrap org");
+    }
+
+    tracing::warn!(
+        "⚠️  ADMIN ACCOUNT CREATED — email: {admin_email}  password: {password}  — CHANGE IMMEDIATELY AFTER LOGIN"
+    );
 }
 
 fn issue_auth(

@@ -1,4 +1,4 @@
-# SafeGuard AI — one-command self-host.
+# SafeGuard AI — one-command self-host from the core repo.
 #
 #   cp .env.example .env   # set JWT_SECRET + your AI provider key
 #   docker compose up -d   # pulls pre-built images — nothing is built locally
@@ -37,11 +37,9 @@ services:
       timeout: 3s
       retries: 10
 
-  # Microsoft Presidio — deep PII NER for the DLP deep-scan path. OPTIONAL and
-  # memory-heavy (~2-3 GB): only starts with `--profile full`. Without it the
-  # gateway still runs the full regex/rule-pack DLP engine (deep NER is just off).
-  # Note: these images are amd64-only — on ARM (e.g. Oracle Ampere) use the slim
-  # profile, or run them under emulation.
+  # Microsoft Presidio — deep PII NER (optional). Only starts with `--profile full`.
+  # Without it the gateway still runs the full regex/rule-pack DLP engine.
+  # amd64-only — on ARM use the slim profile.
   presidio-analyzer:
     image: mcr.microsoft.com/presidio-analyzer:latest
     container_name: safeguard-presidio-analyzer
@@ -77,6 +75,12 @@ services:
       CONTROL_PLANE_BIND: 0.0.0.0:8081
       DATABASE_URL: postgres://${POSTGRES_USER:-safeguard}:${POSTGRES_PASSWORD:-safeguard}@postgres:5432/${POSTGRES_DB:-safeguard}
       REDIS_URL: redis://redis:6379
+      # Admin bootstrap: set ADMIN_EMAIL to auto-create the first admin on first
+      # start. The generated password is logged to stdout. Leave unset for dev.
+      # For cloud-hosted mode (open sign-up as User), also set CONTROL_PLANE_MODE=cloud.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      CONTROL_PLANE_MODE: ${CONTROL_PLANE_MODE:-}
     ports: ["8081:8081"]
     restart: unless-stopped
     depends_on:
